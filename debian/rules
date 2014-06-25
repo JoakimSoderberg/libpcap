@@ -1,0 +1,25 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+# Exclude VCS files from package
+export DH_ALWAYS_EXCLUDE=.svn:.git
+
+%:
+	dh $@ 
+
+override_dh_auto_install:
+	echo "NO"
+
+override_dh_auto_build:
+	#dh_auto_build
+	./configure
+	make
+	
+	# Build rpcapd
+	cd rpcapd && make
+
+override_dh_auto_clean:
+	dh_auto_clean
+
+	# Clean up rpcapd
+	cd rpcapd && make clean

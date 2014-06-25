@@ -1,0 +1,12 @@
+Source: rpcap
+Section: unknown
+Priority: extra
+Maintainer: Netrounds Solutions AB <info@netrounds.com>
+Build-Depends: debhelper (>= 8)
+Standards-Version: 3.9.2
+Homepage: http://www.netrounds.com/
+
+Package: rpcap
+Architecture: any
+Depends: ${Misc:Depends}
+Description: libcap with remote capture daemon
