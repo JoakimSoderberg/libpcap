@@ -47,8 +47,10 @@ VPATH = @srcdir@
 CC = @CC@
 CCOPT = @V_CCOPT@
 INCLS = -I. @V_INCLS@
-DEFS = @DEFS@ @V_DEFS@
+# HAVE_REMOTE
+DEFS = @DEFS@ @V_DEFS@ @V_HAVE_REMOTE@ @V_HAVE_TC_API@
 LIBS = @V_LIBS@
+TCLIBS = @V_TCLIBS@
 DAGLIBS = @DAGLIBS@
 DEPLIBS = @DEPLIBS@
 DYEXT = @DYEXT@
@@ -83,13 +85,18 @@ SSRC =  @SSRC@
 CSRC =	pcap.c inet.c gencode.c optimize.c nametoaddr.c \
 	etherent.c savefile.c bpf_filter.c bpf_image.c bpf_dump.c
 GENSRC = scanner.c grammar.c version.c
+# HAVE_REMOTE
+REMOTESRC = @V_REMOTE_FILES@
+TCSRC = @V_TC_FILES@
 LIBOBJS = @LIBOBJS@
 
-SRC =	$(PSRC) $(FSRC) $(CSRC) $(SSRC) $(GENSRC)
+# HAVE_REMOTE
+SRC =	$(PSRC) $(FSRC) $(CSRC) $(SSRC) $(GENSRC) $(TCSRC) $(REMOTESRC)
 
 # We would like to say "OBJ = $(SRC:.c=.o)" but Ultrix's make cannot
 # hack the extra indirection
-OBJ =	$(PSRC:.c=.o) $(FSRC:.c=.o) $(CSRC:.c=.o) $(SSRC:.c=.o) $(GENSRC:.c=.o) $(LIBOBJS)
+# HAVE_REMOTE
+OBJ =	$(PSRC:.c=.o) $(FSRC:.c=.o) $(CSRC:.c=.o) $(SSRC:.c=.o) $(GENSRC:.c=.o) $(TCSRC:.c=.o) $(REMOTESRC:.c=.o) $(LIBOBJS)
 HDR = \
 	acconfig.h \
 	arcnet.h \
@@ -326,7 +333,7 @@ shared: libpcap.$(DYEXT)
 #
 libpcap.so: $(OBJ)
 	@rm -f $@
-	$(CC) -shared -Wl,-soname,$@.1 -o $@.`cat $(srcdir)/VERSION` $(OBJ) $(DAGLIBS)
+	$(CC) -shared -Wl,-soname,$@.1 -o $@.`cat $(srcdir)/VERSION` $(OBJ) $(DAGLIBS) $(TCLIBS)
 
 #
 # The following rule succeeds, but the result is untested.

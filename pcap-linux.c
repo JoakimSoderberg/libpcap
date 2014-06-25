@@ -126,6 +126,10 @@ static const char rcsid[] _U_ =
 #include "pcap-bt-linux.h"
 #endif
 
+#ifdef HAVE_REMOTE
+#include <pcap-remote.h>
+#endif
+
 /*
  * If PF_PACKET is defined, we can use {SOCK_RAW,SOCK_DGRAM}/PF_PACKET
  * sockets rather than SOCK_PACKET sockets.
@@ -296,37 +300,88 @@ pcap_t *
 pcap_create(const char *device, char *ebuf)
 {
 	pcap_t *handle;
+	char *device_no_prefix = (char*)device;
+
+#ifdef HAVE_REMOTE
+	/*
+		Retrofit; we have to make older applications compatible with the remote capture
+		So, we're calling the pcap_open_remote() from here, that is a very dirty thing.
+		Obviously, we cannot exploit all the new features; for instance, we cannot
+		send authentication, we cannot use a UDP data connection, and so on.
+	*/
+
+	char host[PCAP_BUF_SIZE + 1];
+	char port[PCAP_BUF_SIZE + 1];
+	char name[PCAP_BUF_SIZE + 1];
+	int srctype;
+
+	if (pcap_parsesrcstr(device, &srctype, host, port, name, ebuf) )
+		return NULL;
+
+	if (srctype == PCAP_SRC_IFREMOTE)
+	{
+		handle = pcap_create_common(device, ebuf);
+		if (handle == NULL)
+			return NULL;
+
+		handle->activate_op = pcap_activate_linux;
+		handle->can_set_rfmon_op = NULL;
+		return handle;
+	}
+	
+	if (srctype == PCAP_SRC_IFLOCAL)
+	{
+		/*
+		 * If it starts with rpcap://, cut down the string
+		 */
+		if (strncmp(device, PCAP_SRC_IF_STRING, strlen(PCAP_SRC_IF_STRING)) == 0)
+		{
+			device_no_prefix = (char*)device + strlen(PCAP_SRC_IF_STRING);
+		}
+	}
+#endif		/* HAVE_REMOTE */
 
 #ifdef HAVE_DAG_API
-	if (strstr(device, "dag")) {
-		return dag_create(device, ebuf);
+	if (strstr(device_no_prefix, "dag")) {
+		return dag_create(device_no_prefix, ebuf);
 	}
 #endif /* HAVE_DAG_API */
 
 #ifdef HAVE_SEPTEL_API
-	if (strstr(device, "septel")) {
-		return septel_create(device, ebuf);
+	if (strstr(device_no_prefix, "septel")) {
+		return septel_create(device_no_prefix, ebuf);
 	}
 #endif /* HAVE_SEPTEL_API */
 
 #ifdef PCAP_SUPPORT_BT
-	if (strstr(device, "bluetooth")) {
-		return bt_create(device, ebuf);
+	if (strstr(device_no_prefix, "bluetooth")) {
+		return bt_create(device_no_prefix, ebuf);
 	}
 #endif
 
 #ifdef PCAP_SUPPORT_USB
-	if (strstr(device, "usb")) {
-		return usb_create(device, ebuf);
+	if (strstr(device_no_prefix, "usb")) {
+		return usb_create(device_no_prefix, ebuf);
 	}
 #endif
 
-	handle = pcap_create_common(device, ebuf);
+	handle = pcap_create_common(device_no_prefix, ebuf);
 	if (handle == NULL)
 		return NULL;
 
+#ifdef HAVE_TC_API
+	if (IsTcDevice(handle) == TRUE)
+	{
+		handle->activate_op = TcActivate;
+		handle->can_set_rfmon_op = NULL;
+	}
+#endif
+	else
+	{
 	handle->activate_op = pcap_activate_linux;
 	handle->can_set_rfmon_op = pcap_can_set_rfmon_linux;
+	}
+	
 	return handle;
 }
 
@@ -334,8 +389,7 @@ static int
 pcap_can_set_rfmon_linux(pcap_t *p)
 {
 #ifdef IW_MODE_MONITOR
-	int sock_fd;
-	struct iwreq ireq;
+	int sock_fd;	struct iwreq ireq;
 #endif
 
 	if (p->opt.source == NULL) {
@@ -504,6 +558,64 @@ pcap_activate_linux(pcap_t *handle)
 	const char	*device;
 	int		status = 0;
 	int		activate_ok = 0;
+
+
+#ifdef HAVE_REMOTE
+	char host[PCAP_BUF_SIZE + 1];
+	char port[PCAP_BUF_SIZE + 1];
+	char name[PCAP_BUF_SIZE + 1];
+	int srctype;
+	int opensource_remote_result;
+
+	/*
+		Retrofit; we have to make older applications compatible with the remote capture
+		So, we're calling the pcap_open_remote() from here, that is a very dirty thing.
+		Obviously, we cannot exploit all the new features; for instance, we cannot
+		send authentication, we cannot use a UDP data connection, and so on.
+	*/
+	if (pcap_parsesrcstr(handle->opt.source, &srctype, host, port, name, handle->errbuf) )
+		return PCAP_ERROR;
+
+	if (srctype == PCAP_SRC_IFREMOTE)
+	{
+		opensource_remote_result = pcap_opensource_remote(handle, NULL);
+		
+		if (opensource_remote_result != 0) 
+			return opensource_remote_result;
+		
+		handle->rmt_flags= (handle->opt.promisc) ? PCAP_OPENFLAG_PROMISCUOUS : 0;
+		
+		return 0;
+	} 
+
+	if (srctype == PCAP_SRC_IFLOCAL)
+	{
+		/*
+		 * If it starts with rpcap://, cut down the string
+		 */
+		if (strncmp(handle->opt.source, PCAP_SRC_IF_STRING, strlen(PCAP_SRC_IF_STRING)) == 0)
+		{
+			size_t len = strlen(handle->opt.source) - strlen(PCAP_SRC_IF_STRING) + 1;
+			char *new_string;
+			/*
+			 allocate a new string and free the old one
+			 */
+			if (len > 0)
+			{
+				new_string = (char*)malloc(len);
+				if (new_string != NULL)
+				{
+					char *tmp;
+					strcpy(new_string, handle->opt.source + strlen(PCAP_SRC_IF_STRING));
+					tmp = handle->opt.source;
+					handle->opt.source = new_string;
+					free(tmp);
+				}
+			}
+		}
+	}
+	
+#endif	/* HAVE_REMOTE */
 
 	device = handle->opt.source;
 
@@ -1132,6 +1244,11 @@ pcap_platform_finddevs(pcap_if_t **alldevsp, char *errbuf)
 
 #ifdef PCAP_SUPPORT_USB
 	if (usb_platform_finddevs(alldevsp, errbuf) < 0)
+		return (-1);
+#endif
+
+#ifdef HAVE_TC_API
+	if (TcFindAllDevs(alldevsp, errbuf) < 0)
 		return (-1);
 #endif
 

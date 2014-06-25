@@ -113,6 +113,10 @@ static int odmlockid = 0;
 #include "os-proto.h"
 #endif
 
+#ifdef HAVE_REMOTE
+#include <pcap-remote.h>
+#endif /* HAVE_REMOTE */
+
 #ifdef BIOCGDLTLIST
 # if (defined(HAVE_NET_IF_MEDIA_H) && defined(IFM_IEEE80211)) && !defined(__APPLE__)
 #define HAVE_BSD_IEEE80211
@@ -380,6 +384,65 @@ pcap_t *
 pcap_create(const char *device, char *ebuf)
 {
 	pcap_t *p;
+
+#ifdef HAVE_REMOTE
+	/*
+		Retrofit; we have to make older applications compatible with the remote capture
+		So, we're calling the pcap_open_remote() from here, that is a very dirty thing.
+		Obviously, we cannot exploit all the new features; for instance, we cannot
+		send authentication, we cannot use a UDP data connection, and so on.
+	*/
+
+	char host[PCAP_BUF_SIZE + 1];
+	char port[PCAP_BUF_SIZE + 1];
+	char name[PCAP_BUF_SIZE + 1];
+	int srctype;
+
+	if (pcap_parsesrcstr(device, &srctype, host, port, name, ebuf) )
+		return NULL;
+
+	if (srctype == PCAP_SRC_IFREMOTE)
+	{
+		p= pcap_opensource_remote(device, NULL, ebuf);
+
+		if (p == NULL) 
+			return NULL;
+
+		p->snapshot= snaplen;
+		p->timeout= to_ms;
+		p->rmt_flags= (promisc) ? PCAP_OPENFLAG_PROMISCUOUS : 0;
+
+		return p;
+	}
+
+	if (srctype == PCAP_SRC_IFLOCAL)
+	{
+		/*
+		 * If it starts with rpcap://, cut down the string
+		 */
+		if (strncmp(p->opt.source, PCAP_SRC_IF_STRING, strlen(PCAP_SRC_IF_STRING)) == 0)
+		{
+			size_t len = strlen(p->opt.source) - strlen(PCAP_SRC_IF_STRING) + 1;
+			char *new_string;
+			/*
+			 * allocate a new string and free the old one
+			 */
+			if (len > 0)
+			{
+				new_string = (char*)malloc(len);
+				if (new_string != NULL)
+				{
+					char *tmp;
+					strcpy(new_string, p->opt.source + strlen(PCAP_SRC_IF_STRING));
+					tmp = p->opt.source;
+					p->opt.source = new_string;
+					free(tmp);
+				}
+			}
+		}
+	}
+
+#endif		/* HAVE_REMOTE */
 
 #ifdef HAVE_DAG_API
 	if (strstr(device, "dag"))

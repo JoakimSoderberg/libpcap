@@ -53,6 +53,19 @@
 
 #include <stdio.h>
 
+#ifdef HAVE_REMOTE
+	// We have to define the SOCKET here, although it has been defined in sockutils.h
+	// This is to avoid the distribution of the 'sockutils.h' file around
+	// (for example in the WinPcap developer's pack)
+	#ifndef SOCKET
+		#ifdef WIN32
+			#define SOCKET unsigned int
+		#else
+			#define SOCKET int
+		#endif
+	#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -164,9 +177,11 @@ struct pcap_stat {
 	u_int ps_recv;		/* number of packets received */
 	u_int ps_drop;		/* number of packets dropped */
 	u_int ps_ifdrop;	/* drops by interface XXX not yet supported */
-#ifdef WIN32
-	u_int bs_capt;		/* number of packets that reach the application */
-#endif /* WIN32 */
+#ifdef HAVE_REMOTE
+	u_int ps_capt;		/* number of packets that are received by the application; please get rid off the Win32 ifdef */
+	u_int ps_sent;		/* number of packets sent by the server on the network */
+	u_int ps_netdrop;	/* number of packets lost on the network */
+#endif /* HAVE_REMOTE */
 };
 
 #ifdef MSDOS
@@ -379,6 +394,11 @@ u_long pcap_mac_packets (void);
 int	pcap_get_selectable_fd(pcap_t *);
 
 #endif /* WIN32/MSDOS/UN*X */
+
+#ifdef HAVE_REMOTE
+/* Includes most of the public stuff that is needed for the remote capture */
+#include <remote-ext.h>
+#endif	 /* HAVE_REMOTE */
 
 #ifdef __cplusplus
 }

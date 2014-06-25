@@ -51,6 +51,10 @@ extern "C" {
 extern CRITICAL_SECTION g_PcapCompileCriticalSection;
 #endif /* WIN32 */
 
+#ifdef HAVE_TC_API
+#include "pcap-tc.h"
+#endif
+
 #ifdef MSDOS
 #include <fcntl.h>
 #include <io.h>
@@ -175,6 +179,40 @@ struct pcap_md {
         */
        struct bpf_zbuf_header *bzh;
 #endif /* HAVE_ZEROCOPY_BPF */
+
+
+
+#ifdef HAVE_REMOTE
+/*!
+	There is really a mess with previous variables, and it seems to me that they are not used
+	(they are used in pcap_pf.c only). I think we have to start using them.
+	The meaning is the following:
+
+	- TotPkts: the amount of packets received by the bpf filter, *before* applying the filter
+	- TotAccepted: the amount of packets that satisfies the filter
+	- TotDrops: the amount of packet that were dropped into the kernel buffer because of lack of space
+	- TotMissed: the amount of packets that were dropped by the physical interface; it is basically
+		the value of the hardware counter into the card. This number is never put to zero, so this number
+		takes into account the *total* number of interface drops starting from the interface power-on.
+	- OrigMissed: the amount of packets that were dropped by the interface *when the capture begins*.
+		This value is used to detect the number of packets dropped by the interface *during the present
+		capture*, so that (ps_ifdrops= TotMissed - OrigMissed).
+*/
+	unsigned int TotNetDrops;       //!< keeps the number of packets that have been dropped by the network
+/*!
+	\brief It keeps the number of packets that have been received by the application.
+
+	Packets dropped by the kernel buffer are not counted in this variable. The variable is always
+	equal to (TotAccepted - TotDrops), exept for the case of remote capture, in which we have also
+	packets in fligh, i.e. that have been transmitted by the remote host, but that have not been
+	received (yet) from the client. In this case, (TotAccepted - TotDrops - TotNetDrops) gives a
+	wrong result, since this number does not corresponds always to the number of packet received by
+	the application. For this reason, in the remote capture we need another variable that takes
+	into account of the number of packets actually received by the application.
+*/
+	unsigned int TotCapt;
+#endif /* HAVE_REMOTE */
+
 };
 
 /*
@@ -230,6 +268,13 @@ struct pcap {
 	int selectable_fd;
 	int send_fd;
 #endif /* WIN32 */
+
+#ifdef HAVE_TC_API
+	TC_INSTANCE TcInstance;
+	TC_PACKETS_BUFFER TcPacketsBuffer;
+	ULONG TcAcceptedCount;
+	PCHAR PpiPacket;
+#endif
 
 #ifdef HAVE_LIBDLPI
 	dlpi_handle_t dlpi_hd;
@@ -307,6 +352,19 @@ struct pcap {
 	u_int *dlt_list;
 
 	struct pcap_pkthdr pcap_header;	/* This is needed for the pcap_next_ex() to work */
+
+#ifdef HAVE_REMOTE
+	/*! \brief '1' if we're the network client; needed by several functions (like pcap_setfilter() ) to know if 
+		they have to use the socket or they have to open the local adapter. */
+	int rmt_clientside;
+
+	SOCKET rmt_sockctrl;		//!< socket ID of the socket used for the control connection
+	SOCKET rmt_sockdata;		//!< socket ID of the socket used for the data connection
+	int rmt_flags;				//!< we have to save flags, since they are passed by the pcap_open_live(), but they are used by the pcap_startcapture()
+	int rmt_capstarted;			//!< 'true' if the capture is already started (needed to knoe if we have to call the pcap_startcapture()
+	struct pcap_samp rmt_samp;	//!< Keeps the parameters related to the sampling process.
+	char *currentfilter;		//!< Pointer to a buffer (allocated at run-time) that stores the current filter. Needed when flag PCAP_OPENFLAG_NOCAPTURE_RPCAP is turned on.
+#endif /* HAVE_REMOTE */
 };
 
 /*

@@ -70,6 +70,10 @@ static const char rcsid[] _U_ =
 #include <dagapi.h>
 #endif
 
+#ifdef HAVE_REMOTE
+#include <pcap-remote.h>
+#endif
+
 int 
 pcap_not_initialized(pcap_t *pcap)
 {
@@ -269,6 +273,20 @@ fail:
 int
 pcap_dispatch(pcap_t *p, int cnt, pcap_handler callback, u_char *user)
 {
+#ifdef HAVE_REMOTE
+	/* Checks the capture type */
+	if (p->rmt_clientside)
+	{
+		/* We are on an remote capture */
+		if (!p->rmt_capstarted)
+		{
+			// if the capture has not started yet, please start it
+			if (pcap_startcapture_remote(p) )
+				return -1;
+		}
+	}
+#endif /* HAVE_REMOTE */
+
 	return p->read_op(p, cnt, callback, user);
 }
 
@@ -286,6 +304,20 @@ int
 pcap_loop(pcap_t *p, int cnt, pcap_handler callback, u_char *user)
 {
 	register int n;
+
+#ifdef HAVE_REMOTE
+	/* Checks the capture type */
+	if (p->rmt_clientside)
+	{
+		/* We are on an remote capture */
+		if (!p->rmt_capstarted)
+		{
+			// if the capture has not started yet, please start it
+			if (pcap_startcapture_remote(p) )
+				return -1;
+		}
+	}
+#endif /* HAVE_REMOTE */
 
 	for (;;) {
 		if (p->sf.rfile != NULL) {
@@ -363,6 +395,22 @@ pcap_next_ex(pcap_t *p, struct pcap_pkthdr **pkt_header,
 
 	/* Saves a pointer to the packet headers */
 	*pkt_header= &p->pcap_header;
+
+#ifdef HAVE_REMOTE
+	/* Checks the capture type */
+	if (p->rmt_clientside)
+	{
+		/* We are on an remote capture */
+		if (!p->rmt_capstarted)
+		{
+			// if the capture has not started yet, please start it
+			if (pcap_startcapture_remote(p) )
+				return -1;
+		}
+
+		return pcap_read_nocb_remote(p, pkt_header, (u_char **) pkt_data);
+	}
+#endif /* HAVE_REMOTE */
 
 	if (p->sf.rfile != NULL) {
 		int status;
@@ -781,6 +829,11 @@ pcap_file(pcap_t *p)
 int
 pcap_fileno(pcap_t *p)
 {
+#ifdef HAVE_REMOTE
+	if (p->rmt_clientside)
+		return(p->rmt_sockdata);
+#endif /* HAVE_REMOTE */
+
 #ifndef WIN32
 	return (p->fd);
 #else
@@ -1265,7 +1318,7 @@ pcap_offline_filter(struct bpf_program *fp, const struct pcap_pkthdr *h,
 #ifdef HAVE_VERSION_H
 #include "version.h"
 #else
-static const char pcap_version_string[] = "libpcap version 0.9[.x]";
+static const char pcap_version_string[] = "libpcap version 1.0 branch 1_0_rel0b (20091008)";
 #endif
 
 #ifdef WIN32
@@ -1274,7 +1327,7 @@ static const char pcap_version_string[] = "libpcap version 0.9[.x]";
  * version numbers when building WinPcap.  (It'd be nice to do so for
  * the packet.dll version number as well.)
  */
-static const char wpcap_version_string[] = "4.0";
+static const char wpcap_version_string[] = "4.1.3";
 static const char pcap_version_string_fmt[] =
     "WinPcap version %s, based on %s";
 static const char pcap_version_string_packet_dll_fmt[] =

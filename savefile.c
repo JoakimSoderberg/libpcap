@@ -1572,6 +1572,11 @@ pcap_offline_read(pcap_t *p, int cnt, pcap_handler callback, u_char *user)
 	int status = 0;
 	int n = 0;
 
+#ifdef HAVE_REMOTE
+	static int samp_npkt;				// parameter needed for sampling, whtn '1 out of N' method has been requested
+	static struct timeval samp_time;	// parameter needed for sampling, whtn '1 every N ms' method has been requested
+#endif /* HAVE_REMOTE */
+
 	while (status == 0) {
 		struct pcap_pkthdr h;
 
@@ -1601,6 +1606,36 @@ pcap_offline_read(pcap_t *p, int cnt, pcap_handler callback, u_char *user)
 
 		if ((fcode = p->fcode.bf_insns) == NULL ||
 		    bpf_filter(fcode, p->buffer, h.len, h.caplen)) {
+
+#ifdef HAVE_REMOTE
+			if (p->rmt_samp.method == PCAP_SAMP_1_EVERY_N)
+			{
+				samp_npkt= (samp_npkt + 1) % p->rmt_samp.value;
+
+				// Discard all packets that are not '1 out of N'
+				if (samp_npkt != 0)
+					continue;
+			}
+
+			if (p->rmt_samp.method == PCAP_SAMP_FIRST_AFTER_N_MS)
+			{
+				// Check if the timestamp of the arrived packet is smaller than our target time
+				if ( (h.ts.tv_sec < samp_time.tv_sec) ||
+						( (h.ts.tv_sec == samp_time.tv_sec) && (h.ts.tv_usec < samp_time.tv_usec) ) )
+					continue;
+
+				// The arrived packet is suitable for being sent to the remote host
+				// So, let's update the target time
+				samp_time.tv_usec= h.ts.tv_usec + p->rmt_samp.value * 1000;
+				if (samp_time.tv_usec > 1000000)
+				{
+					samp_time.tv_sec= h.ts.tv_sec + samp_time.tv_usec / 1000000;
+					samp_time.tv_usec= samp_time.tv_usec % 1000000;
+				}
+
+			}
+#endif /* HAVE_REMOTE */
+
 			(*callback)(user, &h, p->buffer);
 			if (++n >= cnt && cnt > 0)
 				break;

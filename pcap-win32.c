@@ -52,6 +52,12 @@ int* _errno();
 #define errno (*_errno())
 #endif /* __MINGW32__ */
 
+#ifdef HAVE_REMOTE
+#include <pcap-remote.h>
+#endif	/* HAVE_REMOTE */
+
+#include "pcap-tc.h"
+
 static int pcap_setfilter_win32_npf(pcap_t *, struct bpf_program *);
 static int pcap_setfilter_win32_dag(pcap_t *, struct bpf_program *);
 static int pcap_getnonblock_win32(pcap_t *, char *);
@@ -127,6 +133,14 @@ pcap_stats_win32(pcap_t *p, struct pcap_stat *ps)
 static int
 pcap_setbuff_win32(pcap_t *p, int dim)
 {
+#ifdef HAVE_REMOTE
+	if (p->rmt_clientside)
+	{
+		/* Currently, this is a bug: the capture buffer cannot be set with remote capture */
+		return 0;
+	}
+ #endif        /* HAVE_REMOTE */
+
 	if(PacketSetBuff(p->adapter,dim)==FALSE)
 	{
 		snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "driver error: not enough memory to allocate the kernel buffer");
@@ -166,6 +180,11 @@ pcap_read_win32_npf(pcap_t *p, int cnt, pcap_handler callback, u_char *user)
 	int cc;
 	int n = 0;
 	register u_char *bp, *ep;
+
+#ifdef HAVE_REMOTE
+	static int samp_npkt;				// parameter needed for sampling, with '1 out of N' method has been requested
+	static struct timeval samp_time;	// parameter needed for sampling, with '1 every N ms' method has been requested
+#endif	/* HAVE_REMOTE */
 
 	cc = p->cc;
 	if (p->cc == 0) {
@@ -227,6 +246,42 @@ pcap_read_win32_npf(pcap_t *p, int cnt, pcap_handler callback, u_char *user)
 
 		caplen = bhp->bh_caplen;
 		hdrlen = bhp->bh_hdrlen;
+
+#ifdef HAVE_REMOTE
+		if (p->rmt_samp.method == PCAP_SAMP_1_EVERY_N)
+		{
+			samp_npkt= (samp_npkt + 1) % p->rmt_samp.value;
+
+			// Discard all packets that are not '1 out of N'
+			if (samp_npkt != 0)
+			{
+				bp += BPF_WORDALIGN(caplen + hdrlen);
+				continue;
+			}
+		}
+
+		if (p->rmt_samp.method == PCAP_SAMP_FIRST_AFTER_N_MS)
+		{
+		struct pcap_pkthdr *pkt_header= (struct pcap_pkthdr*) bp;
+
+			// Check if the timestamp of the arrived packet is smaller than our target time
+			if ( (pkt_header->ts.tv_sec < samp_time.tv_sec) ||
+					( (pkt_header->ts.tv_sec == samp_time.tv_sec) && (pkt_header->ts.tv_usec < samp_time.tv_usec) ) )
+			{
+				bp += BPF_WORDALIGN(caplen + hdrlen);
+				continue;
+			}
+
+			// The arrived packet is suitable for being sent to the remote host
+			// So, let's update the target time
+			samp_time.tv_usec= pkt_header->ts.tv_usec + p->rmt_samp.value * 1000;
+			if (samp_time.tv_usec > 1000000)
+			{
+				samp_time.tv_sec= pkt_header->ts.tv_sec + samp_time.tv_usec / 1000000;
+				samp_time.tv_usec= samp_time.tv_usec % 1000000;
+			}
+		}
+#endif	/* HAVE_REMOTE */
 
 		/*
 		 * XXX A bpf_hdr matches a pcap_pkthdr.
@@ -453,6 +508,63 @@ static int
 pcap_activate_win32(pcap_t *p)
 {
 	NetType type;
+
+#ifdef HAVE_REMOTE
+	char host[PCAP_BUF_SIZE + 1];
+	char port[PCAP_BUF_SIZE + 1];
+	char name[PCAP_BUF_SIZE + 1];
+	int srctype;
+	int opensource_remote_result;
+
+	/*
+		Retrofit; we have to make older applications compatible with the remote capture
+		So, we're calling the pcap_open_remote() from here, that is a very dirty thing.
+		Obviously, we cannot exploit all the new features; for instance, we cannot
+		send authentication, we cannot use a UDP data connection, and so on.
+	*/
+	if (pcap_parsesrcstr(p->opt.source, &srctype, host, port, name, p->errbuf) )
+		return PCAP_ERROR;
+
+	if (srctype == PCAP_SRC_IFREMOTE)
+	{
+		opensource_remote_result = pcap_opensource_remote(p, NULL);
+
+		if (opensource_remote_result != 0) 
+			return opensource_remote_result;
+
+		p->rmt_flags= (p->opt.promisc) ? PCAP_OPENFLAG_PROMISCUOUS : 0;
+
+		return 0;
+	}
+
+	if (srctype == PCAP_SRC_IFLOCAL)
+	{
+		/*
+		 * If it starts with rpcap://, cut down the string
+		 */
+		if (strncmp(p->opt.source, PCAP_SRC_IF_STRING, strlen(PCAP_SRC_IF_STRING)) == 0)
+		{
+			size_t len = strlen(p->opt.source) - strlen(PCAP_SRC_IF_STRING) + 1;
+			char *new_string;
+			/*
+			 * allocate a new string and free the old one
+			 */
+			if (len > 0)
+			{
+				new_string = (char*)malloc(len);
+				if (new_string != NULL)
+				{
+					char *tmp;
+					strcpy(new_string, p->opt.source + strlen(PCAP_SRC_IF_STRING));
+					tmp = p->opt.source;
+					p->opt.source = new_string;
+					free(tmp);
+				}
+			}
+		}
+	}
+
+#endif	/* HAVE_REMOTE */
 
 	if (p->opt.rfmon) {
 		/*
@@ -749,7 +861,15 @@ pcap_create(const char *device, char *ebuf)
 	if (p == NULL)
 		return (NULL);
 
+	if (IsTcDevice(p) == TRUE)
+	{
+		p->activate_op = TcActivate;
+	}
+	else
+	{
 	p->activate_op = pcap_activate_win32;
+	}
+
 	return (p);
 }
 
@@ -843,5 +963,5 @@ pcap_setnonblock_win32(pcap_t *p, int nonblock, char *errbuf)
 int
 pcap_platform_finddevs(pcap_if_t **alldevsp, char *errbuf)
 {
-	return (0);
+	return TcFindAllDevs(alldevsp, errbuf);
 }

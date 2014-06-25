@@ -398,6 +398,49 @@ pcap_compile(pcap_t *p, struct bpf_program *program,
 	const char * volatile xbuf = buf;
 	int len;
 
+#ifdef HAVE_TC_API
+	/*
+	 * We cannot generate PPI filters with TurboCap ports, as the
+	 * compiler doesn't generate the correct filtering code in case
+	 * of ethernet over PPI. It only generates 802.11 over PPI code
+	 */
+	if (p->TcInstance != NULL && p->linktype == DLT_PPI && strlen(buf) > 0)
+	{
+		snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "pcap_compile cannot generate filters for a TurboCap port when the PPI linktype is used.");
+		return -1;
+	
+	}
+#endif
+
+#ifdef HAVE_REMOTE
+	/*
+	   Check if:
+	   - We are on an remote capture
+	   - we do not want to capture RPCAP traffic
+	   
+	   If so, we have to save the current filter, because we have to add some
+	   piece of stuff later
+	*/
+	if ( (p->rmt_clientside) && (p->rmt_flags & PCAP_OPENFLAG_NOCAPTURE_RPCAP) )
+	{
+	int bufferlen;
+
+		if (p->currentfilter)
+			free (p->currentfilter);
+
+		if (buf)
+			bufferlen= strlen(buf) + 1;
+		else
+			bufferlen= 1;
+
+		p->currentfilter= (char *) malloc( sizeof(char) * bufferlen);
+
+		strncpy(p->currentfilter, buf, bufferlen);
+
+		p->currentfilter[bufferlen - 1]= 0;
+	}
+#endif /* HAVE_REMOTE */
+
 	no_optimize = 0;
 	n_errors = 0;
 	root = NULL;
