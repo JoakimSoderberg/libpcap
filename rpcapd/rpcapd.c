@@ -65,6 +65,8 @@ int passivemode= 1;						//!< '1' if we want to run in passive mode as well
 struct addrinfo mainhints;				//!< temporary struct to keep settings needed to open the new socket
 char address[MAX_LINE + 1];				//!< keeps the network address (either numeric or literal) to bind to
 char port[MAX_LINE + 1];				//!< keeps the network port to bind to
+char user[256];
+char pwd[256];
 
 extern char *optarg;	// for getopt()
 
@@ -88,7 +90,7 @@ void printusage()
 	char *usagetext =
 	"USAGE:\n"
 	" "  PROGRAM_NAME " [-b <address>] [-p <port>] [-6] [-l <host_list>] [-a <host,port>]\n"
-	"        [-n] [-v] [-d] [-s <file>] [-f <file>]\n"
+	"        [-n] [-v] [-d] [-s <file>] [-f <file>] [-u <user>] [-w <password>]\n"
 	"  -b <address>: the address to bind to (either numeric or literal).\n"
     "      Default: it binds to all local IPv4 addresses\n"
 	"  -p <port>: the port to bind to. Default: it binds to port " RPCAP_DEFAULT_NETPORT "\n"
@@ -108,6 +110,8 @@ void printusage()
 	"  -s <file>: save the current configuration to file\n"
  	"  -f <file>: load the current configuration from file; all the switches\n"
   	"      specified from the command line are ignored\n"
+ 	"  -u <user>: authentication user\n"
+ 	"  -w <password>: authentication password\n"
     "  -h: print this help screen\n\n";
 
 	printf(usagetext);
@@ -148,7 +152,7 @@ char errbuf[PCAP_ERRBUF_SIZE + 1];	// keeps the error string, prior to be printe
 	mainhints.ai_socktype = SOCK_STREAM;
 
 	// Getting the proper command line options
-	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:v")) != -1)
+	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vu:w:")) != -1)
 	{
 		switch (retval)
 		{
@@ -210,10 +214,14 @@ char errbuf[PCAP_ERRBUF_SIZE + 1];	// keeps the error string, prior to be printe
 				break;
 			case 's':
 				strncpy(savefile, optarg, MAX_LINE);
-				break;
 			case 'h':
 				printusage();
 				exit(0);
+			case 'u':
+				strncpy(user, optarg, 256);
+			case 'w':
+				strncpy(pwd, optarg, 256);
+				break;
 			default:
 				break;
 		}

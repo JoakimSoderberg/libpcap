@@ -51,10 +51,12 @@
 #include <shadow.h>		// for password management
 #endif
 
-
+extern char user[256];
+extern char pwd[256];
 
 // Locally defined functions
 int daemon_checkauth(SOCKET sockctrl, int nullAuthAllowed, char *errbuf);
+int netrounds_AuthUserPwd(char *username, char *password, char *errbuf);
 int daemon_AuthUserPwd(char *username, char *password, char *errbuf);
 
 int daemon_findalldevs(SOCKET sockctrl, char *errbuf);
@@ -564,7 +566,8 @@ int retcode;						// the value we have to return to the caller
 			string1[len1]= 0;
 			string2[len2]= 0;
 
-			if (daemon_AuthUserPwd(string1, string2, errbuf) )
+// 			if (daemon_AuthUserPwd(string1, string2, errbuf) )
+			if (netrounds_AuthUserPwd(string1, string2, errbuf) )
 			{
 				retcode= -2;
 				goto error;
@@ -609,6 +612,15 @@ error:
 	return retcode;
 }
 
+int netrounds_AuthUserPwd(char *username, char *password, char *errbuf)
+{
+	if( strncmp( username, user, 256 ) || strncmp( password, pwd, 256 ) )
+	{
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "Authentication failed");
+		return -1;
+	}
+	return 0;
+}
 
 
 int daemon_AuthUserPwd(char *username, char *password, char *errbuf)
